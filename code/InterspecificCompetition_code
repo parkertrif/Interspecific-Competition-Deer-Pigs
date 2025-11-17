@@ -1,0 +1,214 @@
+
+
+# Interspecific competition alters predator-prey dynamics: Evidence from camera surveys of white-tailed deer, wild pigs, and coyotes
+# Date: 10/17/2025
+
+library(overlap)
+library(gridExtra)
+library(tidyverse)
+
+
+# DATA PREPARATION ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Load in data with filepath
+bait_site_deer_pig <- read_csv("PATH/bait_site_deer_pig.csv")
+grid_camera <- read_csv("PATH/grid_camera.csv")
+
+# Split bait site data by species and pig presence
+deer_pigs_absent <- bait_site_deer_pig %>% 
+  filter(species == "White-tailed Deer" & pig_present_at_site == "no")
+
+deer_pigs_present <- bait_site_deer_pig %>% 
+  filter(species == "White-tailed Deer" & pig_present_at_site == "yes")
+
+bait_site_pigs <- bait_site_deer_pig %>%
+  filter(species == "Wild Pig")
+
+# Split grid camera data by species
+grid_coyotes <- grid_camera %>% 
+  filter(species == "Coyote")
+
+grid_deer <- grid_camera %>% 
+  filter(species == "White-tailed Deer")
+
+grid_pigs <- grid_camera %>% 
+  filter(species == "Wild Pig")
+
+# Pull out all radtimes for overlap analysis
+deer_pigs_absent_time <- deer_pigs_absent$radtime
+deer_pigs_present_time <- deer_pigs_present$radtime
+bait_pigs_time <- bait_site_pigs$radtime
+grid_coyotes_time <- grid_coyotes$radtime
+grid_deer_time <- grid_deer$radtime
+grid_pigs_time <- grid_pigs$radtime
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+# SUMMARY STATISTICS ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## Grid camera summary
+grid_summary <- bind_rows(
+  grid_coyotes %>% 
+    summarise(Species = "Coyotes", Total_Detections = n(), Number_of_Sites = n_distinct(placename)),
+  grid_deer %>% 
+    summarise(Species = "Deer", Total_Detections = n(), Number_of_Sites = n_distinct(placename)),
+  grid_pigs %>% 
+    summarise(Species = "Pigs", Total_Detections = n(), Number_of_Sites = n_distinct(placename))
+)
+
+# Print results
+print(grid_summary)
+
+## Bait site summary  
+bait_summary <- bait_site_deer_pig %>%
+  count(species, name = "Total_Detections")
+
+# Print results
+print(bait_summary)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+# TEMPORAL OVERLAP ANALYSIS ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## Calculate overlap estimates and confidence intervals
+overlap_analyses <- list(
+  deer_pig_grid = list(
+    data1 = grid_deer_time, data2 = grid_pigs_time,
+    name = "Grid: Deer vs Pigs"
+  ),
+  deer_coyote_grid = list(
+    data1 = grid_deer_time, data2 = grid_coyotes_time,
+    name = "Grid: Deer vs Coyotes"
+  ),
+  deer_pig_bait_present = list(
+    data1 = bait_pigs_time, data2 = deer_pigs_present_time,
+    name = "Bait: Pigs vs Deer (pigs present)"
+  ),
+  deer_pig_bait_absent = list(
+    data1 = bait_pigs_time, data2 = deer_pigs_absent_time,
+    name = "Bait: Pigs vs Deer (pigs absent)"
+  ),
+  coyote_deer_pigs_absent = list(
+    data1 = grid_coyotes_time, data2 = deer_pigs_absent_time,
+    name = "Grid Coyotes vs Bait Deer (pigs absent)"
+  ),
+  coyote_deer_pigs_present = list(
+    data1 = grid_coyotes_time, data2 = deer_pigs_present_time,
+    name = "Grid Coyotes vs Bait Deer (pigs present)"
+  )
+)
+
+# Run all overlap analyses
+overlap_results <- map(overlap_analyses, function(analysis) {
+  overlap_est <- overlapEst(analysis$data1, analysis$data2, type = "Dhat4")
+  bootstrap_res <- bootstrap(analysis$data1, analysis$data2, 10000, type = "Dhat4", cores = 1)
+  ci <- bootCI(overlap_est, bootstrap_res)
+  list(
+    name = analysis$name,
+    estimate = overlap_est,
+    ci_lower = ci["basic0", "lower"],  
+    ci_upper = ci["basic0", "upper"] 
+  )
+})
+
+# Print results
+walk(overlap_results, function(result) {
+  cat(sprintf("%-35s: %.3f (95%% CI: %.3f-%.3f)\n", 
+              result$name, result$estimate, result$ci_lower, result$ci_upper))
+})
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+# VISUALIZATIONS ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## Bar plots ----
+# Deer and Coyotes
+# Input results from overlap analysis
+deer_coyote_overlaps <- c(0.652, 0.473)
+deer_coyote_names <- c("Pigs Absent", "Pigs Present")
+deer_coyote_ci_lower <- c(0.580, 0.399)
+deer_coyote_ci_upper <- c(0.721, 0.550)
+deer_coyote_plot_data <- data.frame(
+  condition = deer_coyote_names,
+  overlap = deer_coyote_overlaps,
+  ci_lower = deer_coyote_ci_lower,
+  ci_upper = deer_coyote_ci_upper)
+
+# Set colors
+bar_colors <- c("#FFC20A", "#0C7BDC")
+
+# Plot
+plot_dc <- ggplot(deer_coyote_plot_data, aes(x=condition, y=overlap, fill=condition)) +
+  geom_bar(stat="identity", width=0.7, color="black") +
+  geom_errorbar(aes(ymin=ci_lower, ymax=ci_upper), 
+                width=0.2) +
+  scale_fill_manual(values=bar_colors) +  
+  theme_gray() + 
+  ylim(0, 1) +
+  labs(x="", 
+       y="",
+       title="") +
+  theme_classic() +
+  theme(legend.position="none",
+        axis.text.y=element_blank(),    
+        axis.ticks.y=element_blank(),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        plot.title = element_text(size = 16))
+
+# Deer and Pigs
+# Input results from overlap analysis
+deer_pig_overlaps <- c(0.816, 0.644)
+deer_pig_names <- c("Pigs Absent", "Pigs Present")
+deer_pig_ci_lower <- c(0.745, 0.563)
+deer_pig_ci_upper <- c(0.884, 0.725)
+deer_pig_plot_data <- data.frame(
+  condition = deer_pig_names,
+  overlap = deer_pig_overlaps,
+  ci_lower = deer_pig_ci_lower,
+  ci_upper = deer_pig_ci_upper)
+
+# Plot
+plot_dp <- ggplot(deer_pig_plot_data, aes(x=condition, y=overlap, fill=condition)) +
+  geom_bar(stat="identity", width=0.7, color="black") +
+  geom_errorbar(aes(ymin=ci_lower, ymax=ci_upper), 
+                width=0.2) +
+  scale_fill_manual(values=bar_colors) +  
+  theme_gray() + 
+  ylim(0, 1) +
+  labs(x="", 
+       y="Proportion of Overlap",
+       title="") +
+  theme_classic() +
+  theme(legend.position="none",
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        plot.title = element_text(size = 16))
+
+# Combine plots
+grid.arrange(plot_dp, plot_dc, ncol = 2)
+
+## Activity curve plots ----
+# Set consistent y-axis range
+ylim_range <- c(0, 0.09)
+
+# Deer activity by pig presence
+par(mfrow = c(1,1), cex.axis = 0.8, cex.lab = 1.0, mar = c(4, 4, 2, 1))
+overlapPlot(deer_pigs_absent_time, deer_pigs_present_time, 
+            main = "Deer Activity by Pig Presence", ylim = ylim_range)
+legend('top', c("Pigs Absent", "Pigs Present"), lty = c(1,2), col = c(1,4), 
+       bty = 'n', inset = c(0.05, 0.05), cex = 1.0)
+
+# Deer and coyotes by pig presence 
+par(mfrow = c(1,2), cex.axis = 1.0, cex.lab = 1.2, mar = c(4, 4, 2, 1), oma = c(0,0,0,0))
+# Pigs present
+overlapPlot(deer_pigs_present_time, grid_coyotes_time, 
+            main = "Pigs Present", yaxt = "n", ylab = "", ylim = ylim_range)
+legend('top', c("Deer", "Coyotes"), lty = c(1,2), col = c(1,4), 
+       bty = 'n', inset = c(0.05, 0.05), cex = 1.0)
+# Pigs absent  
+overlapPlot(deer_pigs_absent_time, grid_coyotes_time, 
+            main = "Pigs Absent", ylim = ylim_range)
+legend('top', c("Deer", "Coyotes"), lty = c(1,2), col = c(1,4), 
+       bty = 'n', inset = c(0.05, 0.05), cex = 1.0)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
