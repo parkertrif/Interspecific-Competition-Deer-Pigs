@@ -10,7 +10,7 @@ This repository contains the data and code for analyzing temporal overlap and ac
 │   ├── bait_site_deer_pig.csv
 │   └── grid_camera.csv
 ├── scripts/
-│   └── temporal_analysis.R
+│   └── IC_Code.R
 └── README.md
 ```
 
